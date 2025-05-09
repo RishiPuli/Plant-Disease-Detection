@@ -1,50 +1,50 @@
+import os
 import tensorflow as tf
 from tensorflow.keras.applications import EfficientNetB0
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.layers import Input, Conv2D, GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from utils.dataset import PlantDataset
 import matplotlib.pyplot as plt
-import os
 
-# Configuration
-DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')  # Absolute path
-IMG_SIZE = (256, 256)
-BATCH_SIZE = 32
-EPOCHS = 30
-
-print(f"Using data from: {DATA_DIR}")
-
-try:
-    # Initialize dataset
-    dataset = PlantDataset(DATA_DIR, IMG_SIZE, BATCH_SIZE)
-    train_gen = dataset.get_generator('train', augment=True)
-    val_gen = dataset.get_generator('val')
+def build_model(img_size=(512, 512)):
+    input_layer = Input(shape=(*img_size, 3))
     
-    print(f"Found {train_gen.samples} training images")
-    print(f"Found {val_gen.samples} validation images")
-
-    # Model architecture
     base_model = EfficientNetB0(
         include_top=False,
         weights='imagenet',
-        input_shape=(*IMG_SIZE, 3)
+        input_tensor=input_layer
     )
-    base_model.trainable = True
+    
+    x = base_model.output
+    x = Conv2D(256, (3,3), activation='relu', name='top_conv_layer')(x)
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(128, activation='relu')(x)
+    outputs = Dense(3, activation='softmax')(x)
+    
+    return Model(inputs=input_layer, outputs=outputs)
 
-    model = tf.keras.Sequential([
-        base_model,
-        GlobalAveragePooling2D(),
-        Dense(512, activation='relu'),
-        Dense(3, activation='softmax')
-    ])
-
+def train():
+    # Configuration
+    DATA_DIR = 'data'
+    IMG_SIZE = (512, 512)
+    BATCH_SIZE = 16
+    EPOCHS = 100
+    
+    # Dataset
+    dataset = PlantDataset(DATA_DIR, IMG_SIZE)
+    train_gen, val_gen = dataset.get_generators(BATCH_SIZE)
+    
+    # Model
+    model = build_model(IMG_SIZE)
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(1e-4),
+        optimizer=tf.keras.optimizers.Adam(1e-5),
         loss='categorical_crossentropy',
-        metrics=['accuracy']
+        metrics=['accuracy', 
+                tf.keras.metrics.Precision(name='precision'),
+                tf.keras.metrics.Recall(name='recall')]
     )
-
+    
     # Callbacks
     os.makedirs('models', exist_ok=True)
     callbacks = [
@@ -55,44 +55,41 @@ try:
         ),
         EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=15,
             restore_best_weights=True
+        ),
+        ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.2,
+            patience=5,
+            min_lr=1e-7
         )
     ]
-
+    
     # Training
     history = model.fit(
         train_gen,
         epochs=EPOCHS,
         validation_data=val_gen,
-        callbacks=callbacks,
-        steps_per_epoch=train_gen.samples // BATCH_SIZE,
-        validation_steps=val_gen.samples // BATCH_SIZE
+        callbacks=callbacks
     )
-
-    # Save training plot
-    plt.figure(figsize=(12, 5))
+    
+    # Plot results
+    plt.figure(figsize=(15, 5))
     plt.subplot(1, 2, 1)
-    plt.plot(history.history['accuracy'], label='Train Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.plot(history.history['accuracy'], label='Train')
+    plt.plot(history.history['val_accuracy'], label='Validation')
+    plt.title('Model Accuracy')
     plt.legend()
     
     plt.subplot(1, 2, 2)
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(history.history['loss'], label='Train')
+    plt.plot(history.history['val_loss'], label='Validation')
+    plt.title('Model Loss')
     plt.legend()
     
-    plt.savefig('training_history.jpg')
+    plt.savefig('training_history.png')
     plt.show()
 
-    # Add this at the end of train.py (before the plt.show())
-    model.save('models/best_model.keras')
-    print("Model explicitly saved to models/best_model.keras")
-
-except Exception as e:
-    print(f"\nERROR: {str(e)}")
-    print("\nTroubleshooting Tips:")
-    print("1. Verify your data folder structure matches exactly")
-    print("2. Check all class folders contain images")
-    print(f"3. Confirm path exists: {DATA_DIR}")
-    print("4. Image files should be .jpg")
+if __name__ == "__main__":
+    train()
