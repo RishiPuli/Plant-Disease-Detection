@@ -137,13 +137,9 @@ def predict():
             logger.error("Invalid image data format")
             return jsonify({'error': 'Invalid image data format'}), 400
             
-        try:
-            image_data = image_data.split(',')[1]
-            img_bytes = base64.b64decode(image_data)
-            img = Image.open(BytesIO(img_bytes))
-        except Exception as e:
-            logger.error(f"Error decoding image: {str(e)}")
-            return jsonify({'error': 'Invalid image data'}), 400
+        image_data = image_data.split(',')[1]
+        img_bytes = base64.b64decode(image_data)
+        img = Image.open(BytesIO(img_bytes))
         
         # Save the image
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -215,4 +211,4 @@ def update_analytics():
 
 if __name__ == '__main__':
     logger.info(f"Starting server with upload folder: {UPLOAD_FOLDER}")
-    app.run(debug=True) 
+    app.run(debug=True)

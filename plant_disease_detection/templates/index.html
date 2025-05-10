@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant Health Classifier</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Plant Health Classifier</h1>
+            <p>Upload a JPEG image to check your plant's health status</p>
+        </header>
+
+        <div class="info-section">
+            <h2>About Plant Disease Classification</h2>
+            <div class="info-grid">
+                <div class="info-card">
+                    <h3>Healthy Leaves</h3>
+                    <p>Healthy leaves typically show:</p>
+                    <ul>
+                        <li>Uniform green color</li>
+                        <li>No spots or discoloration</li>
+                        <li>Natural leaf structure</li>
+                        <li>Smooth surface</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>Powdery Mildew</h3>
+                    <p>Signs of powdery mildew include:</p>
+                    <ul>
+                        <li>White powdery spots</li>
+                        <li>Fuzzy coating on leaves</li>
+                        <li>Yellow or brown patches</li>
+                        <li>Distorted leaf growth</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>Rust Disease</h3>
+                    <p>Rust disease characteristics:</p>
+                    <ul>
+                        <li>Orange-brown spots</li>
+                        <li>Powdery pustules</li>
+                        <li>Leaf discoloration</li>
+                        <li>Spots on both sides</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <main>
+            <div class="upload-section">
+                <div class="upload-box" id="dropZone">
+                    <img id="preview" src="{{ url_for('static', filename='images/upload-icon.png') }}" alt="Upload Icon">
+                    <p>Drag & Drop or Click to Upload</p>
+                    <p class="file-hint">(Supported format: JPEG)</p>
+                    <input type="file" id="fileInput" accept=".jpg,.jpeg" hidden>
+                </div>
+                <button id="analyzeBtn" disabled>Analyze Plant</button>
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+            </div>
+
+            <div class="result-section" style="display: none;">
+                <h2>Analysis Result</h2>
+                <div class="result-card">
+                    <div class="result-image">
+                        <img id="resultImage" src="" alt="Analyzed Plant">
+                        <div class="image-overlay">
+                            <span class="zoom-hint">Click to zoom</span>
+                        </div>
+                    </div>
+                    <div class="result-details">
+                        <h3>Diagnosis:</h3>
+                        <p id="prediction" class="diagnosis-text"></p>
+                        <div class="confidence-meter">
+                            <span>Confidence:</span>
+                            <div class="meter">
+                                <div id="confidenceBar"></div>
+                            </div>
+                            <span id="confidenceValue"></span>
+                        </div>
+                        <div class="diagnosis-details">
+                            <h4>Recommended Actions:</h4>
+                            <div id="recommendationText"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="analytics-section">
+                <h2>Analytics Dashboard</h2>
+                <div class="charts-container">
+                    <div class="chart" id="distributionChart"></div>
+                    <div class="chart" id="trendChart"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Image Modal -->
+        <div id="imageModal" class="modal">
+            <span class="close-modal">&times;</span>
+            <img id="modalImage" class="modal-content">
+        </div>
+    </div>
+
+    <script>
+        {% if pie_chart %}
+            const pieChartData = {{ pie_chart | safe }};
+            Plotly.newPlot('distributionChart', pieChartData.data, pieChartData.layout);
+        {% endif %}
+
+        {% if trend_chart %}
+            const trendChartData = {{ trend_chart | safe }};
+            Plotly.newPlot('trendChart', trendChartData.data, trendChartData.layout);
+        {% endif %}
+    </script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html> 
