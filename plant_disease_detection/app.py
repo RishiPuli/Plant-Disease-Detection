@@ -8,7 +8,7 @@ import plotly
 import plotly.express as px
 import pandas as pd
 from tensorflow.keras.models import load_model
-from utils.preprocess import preprocess_image
+from utils.segmentation import preprocess_image
 import base64
 from PIL import Image
 from io import BytesIO
@@ -114,10 +114,17 @@ def generate_analytics():
     except Exception as e:
         logger.error(f"Error generating analytics: {str(e)}")
         return None, None
-
+    
 @app.route('/')
 def home():
-    pie_chart, trend_chart = generate_analytics()
+    pie_chart = {
+        'data': [{'labels': ['Healthy', 'Rust', 'Powdery'], 'values': [30, 20, 50], 'type': 'pie'}],
+        'layout': {'title': 'Disease Distribution'}
+    }
+    trend_chart = {
+        'data': [{'x': ['Day 1', 'Day 2'], 'y': [10, 15], 'type': 'scatter'}],
+        'layout': {'title': 'Prediction Trends'}
+    }
     return render_template('index.html', pie_chart=pie_chart, trend_chart=trend_chart)
 
 @app.route('/predict', methods=['POST'])
@@ -128,30 +135,59 @@ def predict():
         
     try:
         logger.info("Received prediction request")
-        if not request.json or 'image' not in request.json:
+        logger.debug(f"Request files: {request.files}")
+        logger.debug(f"Request form: {request.form}")
+        logger.debug(f"Request json: {request.json}")
+        
+        # Handle multipart form data
+        if 'image' in request.files:
+            file = request.files['image']
+            if file.filename == '':
+                logger.error("No file selected")
+                return jsonify({'error': 'No file selected'}), 400
+                
+            # Save the image
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            image_filename = f'plant_{timestamp}.jpg'
+            image_path = os.path.join(UPLOAD_FOLDER, image_filename)
+            
+            try:
+                file.save(image_path)
+                logger.info(f"Saved image to: {image_path}")
+            except Exception as e:
+                logger.error(f"Error saving file: {str(e)}")
+                return jsonify({'error': f'Error saving file: {str(e)}'}), 500
+            
+        # Handle JSON payload with base64 image
+        elif request.json and 'image' in request.json:
+            image_data = request.json['image']
+            if ',' not in image_data:
+                logger.error("Invalid image data format")
+                return jsonify({'error': 'Invalid image data format'}), 400
+                
+            try:
+                # Extract base64 data after the comma
+                image_data = image_data.split(',')[1]
+                img_bytes = base64.b64decode(image_data)
+                img = Image.open(BytesIO(img_bytes))
+                
+                # Convert to RGB if necessary
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                    
+                # Save the image
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                image_filename = f'plant_{timestamp}.jpg'
+                image_path = os.path.join(UPLOAD_FOLDER, image_filename)
+                img.save(image_path, 'JPEG')
+                logger.info(f"Saved image to: {image_path}")
+                
+            except Exception as e:
+                logger.error(f"Error decoding image: {str(e)}")
+                return jsonify({'error': 'Invalid image data'}), 400
+        else:
             logger.error("No image data received")
             return jsonify({'error': 'No image data received'}), 400
-
-        image_data = request.json['image']
-        if ',' not in image_data:
-            logger.error("Invalid image data format")
-            return jsonify({'error': 'Invalid image data format'}), 400
-            
-        image_data = image_data.split(',')[1]
-        img_bytes = base64.b64decode(image_data)
-        img = Image.open(BytesIO(img_bytes))
-        
-        # Save the image
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        image_filename = f'plant_{timestamp}.jpg'
-        image_path = os.path.join(UPLOAD_FOLDER, image_filename)
-        
-        try:
-            img.save(image_path)
-            logger.info(f"Saved image to: {image_path}")
-        except Exception as e:
-            logger.error(f"Error saving image: {str(e)}")
-            return jsonify({'error': 'Error saving image'}), 500
         
         # Preprocess the image using the utility function
         try:
@@ -165,9 +201,9 @@ def predict():
         try:
             predictions = model.predict(img_array)
             predicted_class = class_names[np.argmax(predictions[0])]
-            confidence = float(np.max(predictions[0]) * 100)
+            confidence = float(np.max(predictions[0]))
             
-            logger.info(f"Prediction: {predicted_class}, Confidence: {confidence}%")
+            logger.info(f"Prediction: {predicted_class}, Confidence: {confidence}")
         except Exception as e:
             logger.error(f"Error making prediction: {str(e)}")
             return jsonify({'error': 'Error making prediction'}), 500
@@ -180,13 +216,13 @@ def predict():
             # Don't return error here as the prediction was successful
         
         return jsonify({
-            'prediction': predicted_class,
+            'class': predicted_class,
             'confidence': confidence,
-            'image_path': f'/static/uploads/{image_filename}'  # Return relative path
+            'image_url': f'/static/uploads/{image_filename}'
         })
-    
+        
     except Exception as e:
-        logger.error(f"Unexpected error during prediction: {str(e)}")
+        logger.error(f"Unexpected error in predict route: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred'}), 500
 
 @app.route('/history')

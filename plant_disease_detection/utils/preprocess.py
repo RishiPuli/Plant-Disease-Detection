@@ -1,27 +1,40 @@
 import cv2
 import numpy as np
+from tensorflow.keras.preprocessing import image
+import logging
 
-def preprocess_image(image_path, target_size=(256, 256)):
+logger = logging.getLogger(__name__)
+
+def preprocess_image(image_path):
     """
-    Preprocess image for model prediction
+    Preprocess an image for model prediction.
+    
     Args:
-        image_path: Path to the image file
-        target_size: Tuple of (height, width) for resizing
+        image_path (str): Path to the image file
+        
     Returns:
-        Preprocessed image array
+        numpy.ndarray: Preprocessed image array ready for model prediction
     """
-    # Read image
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Could not read image at {image_path}")
-    
-    # Resize
-    img = cv2.resize(img, target_size)
-    
-    # Normalize
-    img = img / 255.0
-    
-    # Add batch dimension
-    img = np.expand_dims(img, axis=0)
-    
-    return img 
+    try:
+        # Read image
+        img = cv2.imread(image_path)
+        if img is None:
+            raise ValueError(f"Could not read image from {image_path}")
+            
+        # Convert BGR to RGB
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Resize image to model's expected input size (512x512)
+        img = cv2.resize(img, (512, 512))
+        
+        # Convert to array and normalize
+        img_array = image.img_to_array(img)
+        img_array = np.expand_dims(img_array, axis=0)
+        img_array = img_array / 255.0  # Normalize pixel values
+        
+        logger.info(f"Successfully preprocessed image: {image_path}")
+        return img_array
+        
+    except Exception as e:
+        logger.error(f"Error preprocessing image {image_path}: {str(e)}")
+        raise 

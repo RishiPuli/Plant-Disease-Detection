@@ -1,17 +1,18 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
     const analyzeBtn = document.getElementById('analyzeBtn');
+    const preview = document.getElementById('preview');
+    const errorMessage = document.getElementById('errorMessage');
+    const uploadForm = document.getElementById('uploadForm');
     const resultSection = document.querySelector('.result-section');
     const resultImage = document.getElementById('resultImage');
     const prediction = document.getElementById('prediction');
     const confidenceBar = document.getElementById('confidenceBar');
     const confidenceValue = document.getElementById('confidenceValue');
-    const errorMessage = document.getElementById('errorMessage');
     const recommendationText = document.getElementById('recommendationText');
-    const modal = document.getElementById('imageModal');
-    const modalImg = document.getElementById('modalImage');
+    const imageModal = document.getElementById('imageModal');
+    const modalImage = document.getElementById('modalImage');
     const closeModal = document.querySelector('.close-modal');
     const distributionChart = document.getElementById('distributionChart');
     const trendChart = document.getElementById('trendChart');
@@ -61,137 +62,188 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function showError(message) {
-        errorMessage.textContent = message;
-        errorMessage.style.display = 'block';
-        setTimeout(() => {
-            errorMessage.style.display = 'none';
-        }, 5000);
-    }
-
-    // Handle drag and drop
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = 'var(--primary-color)';
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.style.borderColor = 'var(--secondary-color)';
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = 'var(--secondary-color)';
-        handleFile(e.dataTransfer.files[0]);
-    });
-
-    // Handle click upload
+    // Make drop zone clickable
     dropZone.addEventListener('click', () => {
         fileInput.click();
     });
 
-    fileInput.addEventListener('change', (e) => {
-        handleFile(e.target.files[0]);
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
     });
 
-    function handleFile(file) {
-        if (!file) {
-            showError('Please select a file');
+    // Highlight drop zone when item is dragged over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, highlight, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, unhighlight, false);
+    });
+
+    // Handle dropped files
+    dropZone.addEventListener('drop', handleDrop, false);
+
+    // Handle file input change
+    fileInput.addEventListener('change', handleFileSelect, false);
+
+    // Handle form submission
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!fileInput.files.length) {
+            showError('Please select an image first');
             return;
         }
+        handleAnalyze();
+    });
 
-        const validTypes = ['image/jpeg', 'image/jpg'];
-        if (!validTypes.includes(file.type)) {
-            showError('Please upload a JPEG image file');
-            return;
-        }
+    // Handle analyze button click
+    analyzeBtn.addEventListener('click', handleAnalyze, false);
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            preview.src = e.target.result;
-            preview.style.width = '150px';
-            preview.style.height = 'auto';
-            analyzeBtn.disabled = false;
-            errorMessage.style.display = 'none';
-        };
-        reader.onerror = () => {
-            showError('Error reading file');
-        };
-        reader.readAsDataURL(file);
+    // Handle image click for modal
+    resultImage.addEventListener('click', openModal);
+    closeModal.addEventListener('click', closeModalFunc);
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
     }
 
-    // Handle image modal
-    resultImage.addEventListener('click', () => {
-        modal.style.display = 'flex';
-        modalImg.src = resultImage.src;
-    });
+    function highlight(e) {
+        dropZone.classList.add('dragover');
+    }
 
-    closeModal.addEventListener('click', () => {
-        modal.style.display = 'none';
-    });
+    function unhighlight(e) {
+        dropZone.classList.remove('dragover');
+    }
 
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.style.display = 'none';
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        handleFiles(files);
+    }
+
+    function handleFileSelect(e) {
+        const files = e.target.files;
+        handleFiles(files);
+    }
+
+    function handleFiles(files) {
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.type.match('image.*')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                    analyzeBtn.disabled = false;
+                    errorMessage.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                showError('Please select a valid image file (JPEG)');
+            }
         }
-    });
+    }
 
-    // Handle analysis
-    analyzeBtn.addEventListener('click', async () => {
-        try {
-            analyzeBtn.disabled = true;
-            analyzeBtn.textContent = 'Analyzing...';
-            errorMessage.style.display = 'none';
-
-            const response = await fetch('/predict', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    image: preview.src
-                })
-            });
-
+    function handleAnalyze() {
+        const formData = new FormData();
+        formData.append('image', fileInput.files[0]);
+        
+        // Show loading state
+        analyzeBtn.disabled = true;
+        analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        
+        fetch('/predict', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('Network response was not ok');
             }
-
-            const data = await response.json();
-
+            return response.json();
+        })
+        .then(data => {
             if (data.error) {
-                throw new Error(data.error);
+                showError(data.message || 'An error occurred during analysis');
+            } else {
+                displayResults(data);
             }
-
-            // Update UI with results
-            resultImage.src = data.image_path;
-            resultImage.style.width = '100%';
-            resultImage.style.height = 'auto';
-            prediction.textContent = data.prediction;
-            confidenceBar.style.width = `${data.confidence}%`;
-            confidenceValue.textContent = `${data.confidence.toFixed(1)}%`;
-
-            // Add recommendations
-            const recs = recommendations[data.prediction] || [];
-            recommendationText.innerHTML = recs.map(rec => `<p>• ${rec}</p>`).join('');
-
-            // Show results
-            resultSection.style.display = 'block';
-
-            // Update analytics
-            await updateAnalytics();
-
-            // Scroll to results
-            resultSection.scrollIntoView({ behavior: 'smooth' });
-
-        } catch (error) {
+        })
+        .catch(error => {
+            showError('An error occurred while processing your request: ' + error.message);
             console.error('Error:', error);
-            showError('Error analyzing image: ' + error.message);
-        } finally {
+        })
+        .finally(() => {
             analyzeBtn.disabled = false;
-            analyzeBtn.textContent = 'Analyze Plant';
+            analyzeBtn.innerHTML = '<i class="fas fa-microscope"></i> Analyze Plant';
+        });
+    }
+
+    function displayResults(data) {
+        resultSection.style.display = 'block';
+        resultImage.src = data.image_url;
+        prediction.textContent = data.class;
+        prediction.className = 'diagnosis-text ' + data.class.toLowerCase();
+        
+        const confidence = (data.confidence * 100).toFixed(1);
+        confidenceBar.style.width = confidence + '%';
+        confidenceValue.textContent = confidence + '%';
+        
+        // Set recommendation text based on the class
+        let recommendation = '';
+        switch(data.class.toLowerCase()) {
+            case 'healthy':
+                recommendation = 'Your plant appears to be healthy! Continue with regular care and monitoring.';
+                break;
+            case 'powdery':
+                recommendation = 'Your plant shows signs of powdery mildew. Consider:\n' +
+                    '1. Improving air circulation\n' +
+                    '2. Applying fungicide treatment\n' +
+                    '3. Removing affected leaves\n' +
+                    '4. Maintaining proper humidity levels';
+                break;
+            case 'rust':
+                recommendation = 'Your plant shows signs of rust disease. Recommended actions:\n' +
+                    '1. Remove and destroy infected leaves\n' +
+                    '2. Apply appropriate fungicide\n' +
+                    '3. Improve plant spacing for better air circulation\n' +
+                    '4. Avoid overhead watering';
+                break;
         }
-    });
+        recommendationText.innerHTML = recommendation.replace(/\n/g, '<br>');
+        
+        // Scroll to results
+        resultSection.scrollIntoView({ behavior: 'smooth' });
+
+        // Update analytics
+        updateAnalytics();
+    }
+
+    function showError(message) {
+        errorMessage.textContent = message;
+        errorMessage.style.display = 'block';
+        analyzeBtn.disabled = true;
+        preview.style.display = 'none';
+    }
+
+    function openModal() {
+        imageModal.style.display = 'block';
+        modalImage.src = resultImage.src;
+    }
+
+    function closeModalFunc() {
+        imageModal.style.display = 'none';
+    }
+
+    // Close modal when clicking outside the image
+    window.onclick = function(event) {
+        if (event.target == imageModal) {
+            closeModalFunc();
+        }
+    }
 
     // Initial analytics update
     updateAnalytics();

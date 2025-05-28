@@ -14,9 +14,15 @@ class PlantDiseasePredictor:
             self.model = tf.keras.models.load_model(model_path)
             self.segmenter = LeafSegmenter()
             self.class_names = ['healthy', 'powdery', 'rust']
-            self.img_size = (512, 512)
+            self.img_size = (256, 256)  # Changed to match model's expected input size
             # Threshold for considering an image as containing leaves
             self.leaf_threshold = 0.1  # 10% of image area must be green
+            # Confidence thresholds for disease classification
+            self.confidence_thresholds = {
+                'healthy': 0.65,  # Higher threshold for healthy classification
+                'powdery': 0.45,  # Lower threshold for powdery mildew
+                'rust': 0.50     # Moderate threshold for rust
+            }
         except Exception as e:
             raise RuntimeError(f"Predictor initialization failed: {str(e)}")
     
@@ -52,7 +58,15 @@ class PlantDiseasePredictor:
         except Exception as e:
             raise RuntimeError(f"Image preprocessing failed: {str(e)}")
     
-    def predict(self, image_path, explain=False):
+    def predict(self, image_path, leaf_index=None, explain=False, all_leaves=False):
+        """
+        Predict plant disease from an image
+        Args:
+            image_path: Path to the image file
+            leaf_index: Optional index of specific leaf to analyze (0-based)
+            explain: Whether to show detailed explanations
+            all_leaves: Whether to analyze all leaves (default: False)
+        """
         try:
             # Load and preprocess image
             image_norm = self._preprocess_image(image_path)
@@ -67,7 +81,7 @@ class PlantDiseasePredictor:
             # Segment leaves
             masks = self.segmenter.segment((image_norm * 255).astype(np.uint8))
             
-            if not masks:
+            if masks is None or masks.size == 0:
                 return {
                     'error': 'no_leaves',
                     'message': 'No individual leaves could be identified'
@@ -75,16 +89,50 @@ class PlantDiseasePredictor:
             
             # Store masks for later use
             self.segmenter.masks = masks
+            
+            # If all_leaves is False (default), only process the first leaf
+            if not all_leaves and leaf_index is None:
+                leaf_index = 0
+            
+            # If leaf_index is specified, only process that leaf
+            if leaf_index is not None:
+                if leaf_index < 0 or leaf_index >= len(masks):
+                    return {
+                        'error': 'invalid_leaf',
+                        'message': f'Leaf index {leaf_index} is out of range (0-{len(masks)-1})'
+                    }
+                masks = [masks[leaf_index]]
                 
             # Predict for each leaf
             results = []
-            for mask in masks:
+            for i, mask in enumerate(masks):
                 leaf_img = self.segmenter.extract_leaf(image_norm, mask)
+                # Ensure the image is the correct size for the model
+                leaf_img = cv2.resize(leaf_img, self.img_size)
                 pred = self.model.predict(np.expand_dims(leaf_img, 0), verbose=0)[0]
                 
+                # Get the predicted class and confidence
+                pred_class_idx = np.argmax(pred)
+                pred_class = self.class_names[pred_class_idx]
+                confidence = float(pred[pred_class_idx])
+                
+                # Apply confidence thresholds
+                if pred_class == 'healthy' and confidence < self.confidence_thresholds['healthy']:
+                    # If healthy confidence is low, check other classes
+                    powdery_conf = float(pred[1])  # Index 1 is powdery
+                    rust_conf = float(pred[2])     # Index 2 is rust
+                    
+                    if powdery_conf > self.confidence_thresholds['powdery']:
+                        pred_class = 'powdery'
+                        confidence = powdery_conf
+                    elif rust_conf > self.confidence_thresholds['rust']:
+                        pred_class = 'rust'
+                        confidence = rust_conf
+                
                 result = {
-                    'class': self.class_names[np.argmax(pred)],
-                    'confidence': float(np.max(pred)),
+                    'leaf_index': i,
+                    'class': pred_class,
+                    'confidence': confidence,
                     'probabilities': {
                         cls: float(prob) for cls, prob in zip(self.class_names, pred)
                     }
@@ -113,18 +161,23 @@ class PlantDiseasePredictor:
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Plant Disease Prediction Tool')
     parser.add_argument('image_path', help='Path to image file')
-    parser.add_argument('--explain', action='store_true', help='Show explanations')
+    parser.add_argument('--leaf', type=int, help='Index of specific leaf to analyze (0-based)')
+    parser.add_argument('--all', action='store_true', help='Analyze all leaves in the image')
+    parser.add_argument('--explain', action='store_true', help='Show detailed explanations')
     args = parser.parse_args()
     
     try:
         predictor = PlantDiseasePredictor('models/best_model.keras')
-        result = predictor.predict(args.image_path, explain=args.explain)
+        result = predictor.predict(args.image_path, leaf_index=args.leaf, explain=args.explain, all_leaves=args.all)
         
         if 'error' in result:
             if result['error'] == 'no_leaves':
                 print("\nResult: No leaves detected in the image")
+                print(f"Details: {result['message']}")
+            elif result['error'] == 'invalid_leaf':
+                print("\nError: Invalid leaf index")
                 print(f"Details: {result['message']}")
             else:
                 print(f"\nError: {result.get('message', 'Unknown error')}")
@@ -132,14 +185,24 @@ if __name__ == "__main__":
             print("\nPrediction Results:")
             print(f"Primary Classification: {result['primary_class']}")
             print(f"Overall Confidence: {result['confidence']:.2f}")
-            print(f"Number of leaves detected: {result['leaf_count']}")
             
-            if len(result['per_leaf']) > 1:
+            if args.all:
+                print(f"Number of leaves analyzed: {result['leaf_count']}")
                 print("\nPer-leaf Analysis:")
-                for i, leaf in enumerate(result['per_leaf']):
-                    print(f"\nLeaf {i+1}:")
+                for leaf in result['per_leaf']:
+                    print(f"\nLeaf {leaf['leaf_index'] + 1}:")
                     print(f"  Class: {leaf['class']}")
                     print(f"  Confidence: {leaf['confidence']:.2f}")
+                    if args.explain:
+                        print("  Probabilities:")
+                        for cls, prob in leaf['probabilities'].items():
+                            print(f"    {cls}: {prob:.2f}")
+            else:
+                leaf = result['per_leaf'][0]
+                print(f"\nLeaf Analysis:")
+                print(f"  Class: {leaf['class']}")
+                print(f"  Confidence: {leaf['confidence']:.2f}")
+                if args.explain:
                     print("  Probabilities:")
                     for cls, prob in leaf['probabilities'].items():
                         print(f"    {cls}: {prob:.2f}")
